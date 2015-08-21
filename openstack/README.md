@@ -14,6 +14,8 @@
 - **[Edit ~/.bashrc](#edit-bashrc)**
 - **[Run stack.sh](#run-stack-sh)**
 
+**[Troubleshooting][#troubleshooting]**
+
 ##Create the Virtual Machine
 - Processors:
 	- Number of processors: 2
@@ -262,3 +264,73 @@ $> ./stack.sh
 ```
 
 **IMPORTANT:** If the scripts doesn't end properly or something else goes wrong, please unstack first using ```./unstack.sh``` script.
+
+
+#Troubleshooting
+
+##OpenStack role list raises unrecognized arguments: --group
+
+```
+::./stack.sh:780+openstack role list --group 3c65c1a8d12f40a2a9949d5b2922beae --project 18ab3a46314442b183db43bc13b175b4 --column ID --column Name
+usage: openstack role list [-h] [-f {csv,html,json,table,yaml}] [-c COLUMN]
+                           [--max-width <integer>]
+                           [--quote {all,minimal,none,nonnumeric}]
+                           [--project <project>] [--user <user>]
+openstack role list: error: unrecognized arguments: --group 3c65c1a8d12f40a2a9949d5b2922beae
+```
+
+Code location at lib/keystone:418, invoked by functions-common:773.
+
+The first reason is that the python-openstackclient version is too old (`openstack --version`), upgrade it:
+
+```
+sudo pip install --upgrade python-openstackclient
+```
+
+You need to add python-openstackclient to LIBS_FROM_GIT in local.conf, to make sure devstack uses the newest version of python-openstackclient. Note that, devstack will use master branch of python-openstackclient instead of stable/kilo.
+
+```
+# Add python-openstackclient to your LIBS_FROM_GIT
+LIBS_FROM_GIT=python-openstackclient
+```
+
+The next step, since keystone v2.0 doesn't even have the concept "group", you need to force here to use keystone V3 api.
+
+```
+$ git diff
+diff --git a/functions-common b/functions-common
+index d3e93ed..bd55d7e 100644
+--- a/functions-common
++++ b/functions-common
+@@ -773,12 +773,15 @@ function get_or_add_user_project_role {
+ # Gets or adds group role to project
+ # Usage: get_or_add_group_project_role <role> <group> <project>
+ function get_or_add_group_project_role {
++    local os_url="$KEYSTONE_SERVICE_URI_V3"
+     # Gets group role id
+     local group_role_id=$(openstack role list \
+         --group $2 \
+         --project $3 \
+         --column "ID" \
+         --column "Name" \
++        --os-identity-api-version=3 \
++        --os-url=$os_url \
+         | grep " $1 " | get_field 1)
+     if [[ -z "$group_role_id" ]]; then
+         # Adds role to group
+@@ -786,6 +789,8 @@ function get_or_add_group_project_role {
+             $1 \
+             --group $2 \
+             --project $3 \
++            --os-identity-api-version=3 \
++            --os-url=$os_url \
+             | grep " id " | get_field 2)
+     fi
+     echo $group_role_id
+```
+
+```
+wget https://goo.gl/tkJdKW -o functions-common.diff
+git apply functions-common.diff
+rm functions-common.diff
+```
